@@ -2,3 +2,8 @@ sports nepal
 http://www.csc.kth.se/utbildning/kth/kurser/DD1320/tilda12/forel/London2012.csv
 
 https://pkgstore.datahub.io/core/population/population_csv/data/ead5be05591360d33ad1a37382f8f8b1/population_csv.csv
+
+
+others datasouces:
+https://www.kaggle.com/jonamjar/h1b-data-set-2017
+https://www.zillow.com/research/data/
