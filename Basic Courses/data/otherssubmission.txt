@@ -1,0 +1,155 @@
+import numpy as np
+import pandas as pd
+
+import matplotlib
+
+matplotlib.use('Qt5Agg')
+
+import matplotlib.pyplot as plt
+from mpl_toolkits.basemap import Basemap
+from matplotlib.colorbar import ColorbarBase
+from matplotlib.colors import rgb2hex, Normalize, NoNorm
+import matplotlib.cm as cm
+from matplotlib.patches import Polygon
+from matplotlib.collections import PatchCollection
+from sklearn.preprocessing import MinMaxScaler
+from matplotlib import gridspec
+
+df = pd.read_parquet('H-1B_Disclosure_Data_FY17.parquet')
+df1 = pd.read_csv('State_MedianRentalPrice_AllHomes.csv')
+
+# https://www.kaggle.com/jonamjar/h1b-data-set-2017
+# https://www.zillow.com/research/data/
+states = {'OH': 'Ohio', 'KY': 'Kentucky', 'AS': 'American Samoa', 'NV': 'Nevada', 'WY': 'Wyoming',
+          'NA': 'National', 'AL': 'Alabama', 'MD': 'Maryland', 'AK': 'Alaska', 'UT': 'Utah', 'OR': 'Oregon',
+          'MT': 'Montana', 'IL': 'Illinois', 'TN': 'Tennessee', 'DC': 'District of Columbia', 'VT': 'Vermont',
+          'ID': 'Idaho', 'AR': 'Arkansas', 'ME': 'Maine', 'WA': 'Washington', 'HI': 'Hawaii', 'WI': 'Wisconsin',
+          'MI': 'Michigan', 'IN': 'Indiana', 'NJ': 'New Jersey', 'AZ': 'Arizona', 'GU': 'Guam', 'MS': 'Mississippi',
+          'PR': 'Puerto Rico', 'NC': 'North Carolina', 'TX': 'Texas', 'SD': 'South Dakota',
+          'MP': 'Northern Mariana Islands', 'IA': 'Iowa', 'MO': 'Missouri', 'CT': 'Connecticut',
+          'WV': 'West Virginia', 'SC': 'South Carolina', 'LA': 'Louisiana', 'KS': 'Kansas', 'NY': 'New York',
+          'NE': 'Nebraska', 'OK': 'Oklahoma', 'FL': 'Florida', 'CA': 'California', 'CO': 'Colorado',
+          'PA': 'Pennsylvania', 'DE': 'Delaware', 'NM': 'New Mexico', 'RI': 'Rhode Island', 'MN': 'Minnesota',
+          'VI': 'Virgin Islands', 'NH': 'New Hampshire', 'MA': 'Massachusetts', 'GA': 'Georgia',
+          'ND': 'North Dakota', 'VA': 'Virginia'}
+states_short = {v: k for k, v in states.items()}
+df = df[df['CASE_SUBMITTED'].str.contains('2016') | df['CASE_SUBMITTED'].str.contains('2017')]
+df = df[(df['CASE_STATUS'] == 'CERTIFIED') & (df['WAGE_UNIT_OF_PAY'] != 'Hour')]
+
+it_jobs = ['SOLUTION', 'ARCHITECT', 'DEVELOPER', 'SOFTWARE', 'ANALYST', 'ENGINEER',
+           'SOFTWARE TESTING', 'ENGINEERING ASSOCIATE', 'COMPUTER', 'PROGRAMMER','DESIGNER', 'APPLICATION',
+           'TESTER', 'WORKDAY', 'WINDOWS', 'WEBSPHERE', 'WEB', 'DATA', 'HADOOP', 'CYBER', 'IT SYSTEMS', 'IT ']
+
+df['selection'] = df['JOB_TITLE'].apply(lambda x: any([s in x for s in it_jobs]) if x is not None else False)
+df = df[df['selection'] == True]
+
+df.loc[df['WAGE_UNIT_OF_PAY'] == 'Month', 'WAGE_RATE_OF_PAY_FROM'] = df[df['WAGE_UNIT_OF_PAY'] == 'Month'][
+                                                                         'WAGE_RATE_OF_PAY_FROM'] * 12
+df.loc[df['WAGE_UNIT_OF_PAY'] == 'Bi-Weekly', 'WAGE_RATE_OF_PAY_FROM'] = df[df['WAGE_UNIT_OF_PAY'] == 'Bi-Weekly'][
+                                                                             'WAGE_RATE_OF_PAY_FROM'] * 26
+
+df['state'] = df['WORKSITE_STATE'].map(states)
+
+df1 = df1[['RegionName','2016-09','2016-10','2016-11','2016-12','2017-01','2017-02',
+            '2017-03','2017-04','2017-05','2017-06','2017-07','2017-08','2017-09']]
+
+df1.replace(np.nan, 0, inplace=True)
+df1['mean_rent'] = df1[['2016-09','2016-10','2016-11','2016-12','2017-01','2017-02',
+            '2017-03','2017-04','2017-05','2017-06','2017-07','2017-08','2017-09']].mean(axis=1)
+df1.sort_values('RegionName', inplace=True)
+df1.reset_index(inplace=True, drop=True)
+
+h1b = df.groupby('state').agg({'state': 'count'})
+h1b = h1b[h1b['state'] > h1b['state'].mean()]
+
+h1b['qq'] = np.arange(len(h1b))
+h1b['state_short'] = h1b.index.map(states_short)
+
+wages = df.groupby('state').agg({'WAGE_RATE_OF_PAY_FROM': 'mean'})
+wages = wages.merge(df1[['RegionName','mean_rent']],left_on='state', right_on='RegionName')
+wages['WAGE_RATE_OF_PAY_FROM'] = wages['WAGE_RATE_OF_PAY_FROM']/wages['mean_rent']
+
+min_wage = wages['WAGE_RATE_OF_PAY_FROM'].min()
+max_wage = wages['WAGE_RATE_OF_PAY_FROM'].max()
+
+wages = wages.set_index('RegionName')
+
+color_dict = wages[['WAGE_RATE_OF_PAY_FROM']].to_dict()['WAGE_RATE_OF_PAY_FROM']
+
+f = plt.figure(figsize=(15, 12), dpi=120)
+
+gs = gridspec.GridSpec(2, 1, height_ratios=[16, 2])
+ax1 = plt.subplot(gs[0])
+ax2 = plt.subplot(gs[1])
+
+map = Basemap(llcrnrlon=-119, llcrnrlat=22, urcrnrlon=-64, urcrnrlat=49,
+              projection='aea', resolution='c', lat_1=33, lat_2=45, lon_0=-95, ax=ax1)
+map.drawmapboundary(fill_color=None, color='lightgrey', linewidth=0.5, ax=ax1)
+shp_info = map.readshapefile('st99_d00', name='states', drawbounds=True, color='w', linewidth=1, ax=ax1)
+
+state_names_in_map = [shapedict['NAME'] for shapedict in map.states_info]
+
+cmap = plt.cm.Purples
+
+norm = matplotlib.colors.Normalize(vmin=min_wage, vmax=max_wage)
+sm = cm.ScalarMappable(norm=norm, cmap=cmap)
+states_abbr_on_map = []
+patches = []
+colors = []
+states_no_omit = ['PR', 'HW', 'AK']
+
+for nshape, seg in enumerate(map.states):
+    state_name = state_names_in_map[nshape]
+    x, y = np.array(seg).mean(axis=0)
+
+    if state_name not in color_dict:
+        continue
+    color = sm.to_rgba(color_dict[state_name])
+    colors.append(color)
+    poly = Polygon(seg, facecolor=color, edgecolor=color)
+    if state_name not in states_abbr_on_map and states_short[state_name] not in states_no_omit:
+        ax1.text(x + .1, y, states_short[state_name], ha="center", va="baseline")
+    patches.append(poly)
+    ax1.add_patch(poly)
+    states_abbr_on_map.append(state_name)
+
+p = PatchCollection(patches, cmap=cmap)
+p.set_array(np.array(colors))
+cbar = f.colorbar(p, ax=ax1)
+cbar.ax.set_yticklabels(range(int(min_wage), int(max_wage), int((max_wage - min_wage) / 5)), fontsize=13)
+
+ax1.set_title('Ratio of US states wage averaged to median rent price 2016-2017', fontsize=16)
+plt.title('States with above-average number of certified H-1B visas 2016-2017', fontsize=16)
+
+ax2.spines['right'].set_visible(False)
+ax2.spines['top'].set_visible(False)
+ax2.spines['bottom'].set_visible(False)
+
+ax2.set_xticks(np.arange(0, len(h1b), 1))
+ax2.set_xticklabels(h1b['state_short'].values, rotation=45)
+ax2.tick_params(top='off', bottom='on', left='on', right='off', labelleft='on', labelbottom='on', labelsize=13)
+ax2.xaxis.set_ticks_position('none')
+
+def arrowed_spines(ax=None, arrow_length=5, labels=('', ''), arrowprops=None):
+    xlabel, ylabel = labels
+    if ax is None:
+        ax = plt.gca()
+    if arrowprops is None:
+        arrowprops = dict(arrowstyle='<|-', facecolor='black')
+
+    for i, spine in enumerate(['left', 'bottom']):
+
+        t = ax.spines[spine].get_transform()
+        xy, xycoords = [1, 0], ('axes fraction', t)
+        xytext, textcoords = [arrow_length, 0], ('offset points', t)
+        ha, va = 'left', 'bottom'
+
+        if spine is not 'bottom':
+            yarrow = ax.annotate(ylabel, xy[::-1], xycoords=xycoords[::-1],
+                        xytext=xytext[::-1], textcoords=textcoords[::-1],
+                        ha='center', va=va, arrowprops=arrowprops)
+    return yarrow
+
+arrowed_spines(ax2)
+ax2.bar(left=h1b['qq'], height=h1b['state'], edgecolor='lightgrey', color='b', alpha=0.7)
+plt.show()
