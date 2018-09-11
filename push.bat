@@ -1,3 +1,5 @@
+@echo off
+set /p comment="Enter Comment: "
 git add .
-git commit -m "Add existing file"
+git commit -m %comment%
 git push origin master
